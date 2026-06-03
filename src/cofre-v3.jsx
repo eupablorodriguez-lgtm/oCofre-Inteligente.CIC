@@ -543,16 +543,7 @@ function DetalheCofre({ cofre, onVoltar, onDepositar }) {
             </>
           )}
           {saqueStep === 2 && (
-            <div style={{ textAlign: "center", padding: "10px 0" }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>📨</div>
-              <h3 style={{ margin: 0, color: C.white, fontSize: 18, fontWeight: 700 }}>Guardião notificado</h3>
-              <p style={{ color: C.mid, marginTop: 8, fontSize: 13 }}>
-                Sua solicitação de saque foi enviada. O processamento leva até 1 dia útil.
-              </p>
-              <div style={{ marginTop: 20 }}>
-                <Btn full onClick={() => setShowSaqueAlert(false)}>Entendido</Btn>
-              </div>
-            </div>
+            <SaqueOTP cofre={cofre} onClose={() => setShowSaqueAlert(false)} />
           )}
         </Modal>
       )}
@@ -864,14 +855,38 @@ function DepositoModal({ cofre, onClose }) {
   );
 }
 
-/* ─── RESGATE MODAL ──────────────────────────────────────────────────────── */
-function ResgateModal({ cofre, onClose }) {
+/* ─── SMS OTP COMPONENT (reutilizado em saque e resgate) ─────────────────── */
+function SaqueOTP({ cofre, onClose, valor, isResgate = false }) {
   const [chave, setChave] = useState("");
-  const [step, setStep] = useState(0);
-  function processar() { setTimeout(() => setStep(1), 1800); setStep("loading"); }
+  const [otp, setOtp] = useState("");
+  const [step, setStep] = useState(isResgate ? 0 : "otp"); // resgate pede chave primeiro
+  const [otpEnviado, setOtpEnviado] = useState(false);
+  const [processando, setProcessando] = useState(false);
+  const [tempo, setTempo] = useState(30);
+
+  useEffect(() => {
+    if (otpEnviado && tempo > 0) {
+      const t = setTimeout(() => setTempo(t => t - 1), 1000);
+      return () => clearTimeout(t);
+    }
+  }, [otpEnviado, tempo]);
+
+  function enviarOTP() {
+    setOtpEnviado(true);
+    setTempo(30);
+    setStep("otp");
+  }
+
+  function confirmar() {
+    setProcessando(true);
+    setTimeout(() => setStep("sucesso"), 1600);
+  }
+
+  const valorFinal = valor || cofre.saldo;
 
   return (
-    <Modal onClose={onClose}>
+    <>
+      {/* Step 0: pedir chave Pix (só no resgate da meta) */}
       {step === 0 && (
         <>
           <div style={{ textAlign: "center", marginBottom: 22 }}>
@@ -887,54 +902,693 @@ function ResgateModal({ cofre, onClose }) {
             <p style={{ margin: "6px 0 0", fontSize: 12, color: C.mid }}>+ rendimento CDI do período</p>
           </div>
           <Input label="Sua chave Pix para receber" value={chave} onChange={setChave} placeholder="CPF, telefone ou e-mail" />
-          <Btn full onClick={processar} disabled={!chave} color={C.teal}>Resgatar agora 💸</Btn>
+          <Btn full onClick={enviarOTP} disabled={!chave} color={C.teal}>Continuar →</Btn>
         </>
       )}
-      {step === "loading" && (
-        <div style={{ textAlign: "center", padding: "30px 0" }}>
-          <div style={{ fontSize: 44, marginBottom: 12, animation: "pulse 1s infinite" }}>⏳</div>
-          <p style={{ color: C.mid }}>Processando Pix...</p>
-        </div>
-      )}
-      {step === 1 && (
-        <div style={{ textAlign: "center", padding: "20px 0" }}>
-          <div style={{ fontSize: 60, marginBottom: 14 }}>✅</div>
-          <h3 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: C.teal }}>Pix enviado!</h3>
-          <p style={{ color: C.mid, marginTop: 8, fontSize: 13, lineHeight: 1.6 }}>
-            {fmtR(cofre.saldo)} a caminho da sua conta.<br />Obrigado por confiar no Cofre!
-          </p>
-          <div style={{ marginTop: 24 }}>
-            <Btn full onClick={onClose}>Fechar</Btn>
+
+      {/* Step OTP */}
+      {step === "otp" && (
+        <>
+          <div style={{ textAlign: "center", marginBottom: 24 }}>
+            <div style={{ fontSize: 44, marginBottom: 10 }}>📱</div>
+            <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: C.white }}>Confirmação por SMS</h3>
+            <p style={{ color: C.mid, marginTop: 8, fontSize: 13, lineHeight: 1.6 }}>
+              Enviamos um código para o seu número cadastrado.<br />
+              <strong style={{ color: C.white }}>••• ••••• 4821</strong>
+            </p>
           </div>
+
+          {/* OTP boxes */}
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 22 }}>
+            {[0,1,2,3,4,5].map(i => (
+              <div key={i} style={{
+                width: 44, height: 52, borderRadius: 12,
+                background: C.surface, border: `1.5px solid ${otp.length > i ? C.teal : C.border}`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 22, fontWeight: 700, color: C.white,
+                fontFamily: "'DM Mono', monospace",
+                transition: "border-color 0.2s",
+              }}>
+                {otp[i] || ""}
+              </div>
+            ))}
+          </div>
+
+          {/* Hidden input trick */}
+          <input
+            type="number" maxLength={6}
+            value={otp} onChange={e => { if(e.target.value.length <= 6) setOtp(e.target.value); }}
+            style={{
+              position: "absolute", opacity: 0, width: 1, height: 1, pointerEvents: "none",
+            }}
+            autoFocus
+          />
+          <div style={{
+            background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 12, padding: "12px 16px", marginBottom: 20,
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+          }}>
+            <span style={{ fontSize: 13, color: C.mid }}>Digite o código de 6 dígitos</span>
+            <input
+              type="number"
+              value={otp}
+              onChange={e => { if(String(e.target.value).length <= 6) setOtp(String(e.target.value)); }}
+              placeholder="000000"
+              style={{
+                background: "transparent", border: "none", outline: "none",
+                color: C.white, fontFamily: "'DM Mono', monospace",
+                fontSize: 18, width: 100, textAlign: "right",
+              }}
+            />
+          </div>
+
+          {/* Resumo do Pix */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+            {[
+              ["Valor", fmtR(valorFinal)],
+              ["Chave Pix destino", chave || "••••••••••"],
+              ["Processamento", "⚡ Instantâneo via Pix"],
+            ].map(([k, v]) => (
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${C.border}` }}>
+                <span style={{ fontSize: 12, color: C.mid }}>{k}</span>
+                <span style={{ fontSize: 12, color: k === "Processamento" ? C.teal : C.white, fontFamily: "'DM Mono', monospace", fontWeight: k === "Processamento" ? 700 : 400 }}>{v}</span>
+              </div>
+            ))}
+          </div>
+
+          <Btn full onClick={confirmar} disabled={otp.length < 4 || processando} color={C.teal}>
+            {processando ? "Enviando Pix..." : "Confirmar e receber agora 💸"}
+          </Btn>
+
+          <p style={{ textAlign: "center", fontSize: 12, color: C.dim, marginTop: 14 }}>
+            {tempo > 0
+              ? `Reenviar código em ${tempo}s`
+              : <span onClick={enviarOTP} style={{ color: C.orange, cursor: "pointer", fontWeight: 600 }}>Reenviar código</span>
+            }
+          </p>
+        </>
+      )}
+
+      {/* Sucesso */}
+      {step === "sucesso" && (
+        <div style={{ textAlign: "center", padding: "16px 0" }}>
+          <div style={{ fontSize: 64, marginBottom: 14 }}>✅</div>
+          <h3 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: C.teal }}>Pix enviado!</h3>
+          <p style={{ color: C.mid, marginTop: 10, fontSize: 14, lineHeight: 1.7 }}>
+            <strong style={{ color: C.white }}>{fmtR(valorFinal)}</strong> já caiu na sua conta.<br />
+            O Pix é instantâneo — confira seu banco agora.
+          </p>
+          <div style={{
+            background: `${C.teal}10`, border: `1px solid ${C.teal}25`,
+            borderRadius: 14, padding: "14px 16px", margin: "20px 0",
+            display: "flex", gap: 10, alignItems: "center",
+          }}>
+            <span style={{ fontSize: 28 }}>⚡</span>
+            <div style={{ textAlign: "left" }}>
+              <p style={{ margin: 0, fontSize: 12, color: C.teal, fontWeight: 700 }}>Transferência instantânea</p>
+              <p style={{ margin: "2px 0 0", fontSize: 11, color: C.mid }}>Processado pela rede Pix do Banco Central</p>
+            </div>
+          </div>
+          <Btn full onClick={onClose}>Fechar</Btn>
         </div>
       )}
+    </>
+  );
+}
+
+/* ─── RESGATE MODAL ──────────────────────────────────────────────────────── */
+function ResgateModal({ cofre, onClose }) {
+  return (
+    <Modal onClose={onClose}>
+      <SaqueOTP cofre={cofre} onClose={onClose} isResgate={true} />
     </Modal>
   );
 }
 
 /* ─── BOTTOM NAV ─────────────────────────────────────────────────────────── */
-function BottomNav() {
+function BottomNav({ onIA }) {
   const [active, setActive] = useState("cofres");
   return (
     <div style={{
       position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
       width: "100%", maxWidth: 430,
-      background: "rgba(8,8,16,0.95)", backdropFilter: "blur(20px)",
-      borderTop: `1px solid ${C.border}`, padding: "10px 0 26px",
-      display: "flex", justifyContent: "space-around", zIndex: 20,
+      background: "rgba(8,8,16,0.97)", backdropFilter: "blur(20px)",
+      borderTop: `1px solid ${C.border}`, padding: "12px 0 28px",
+      display: "flex", justifyContent: "space-around", alignItems: "center", zIndex: 50,
     }}>
-      {[["🏦", "cofres"], ["📊", "metas"], ["⚙️", "config"]].map(([ic, id]) => (
-        <button key={id} onClick={() => setActive(id)} style={{
-          background: "none", border: "none",
-          color: active === id ? C.orange : C.dim,
-          fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700,
-          cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-          letterSpacing: 0.5, textTransform: "capitalize",
-          transition: "color 0.2s",
-        }}>
-          <span style={{ fontSize: 22 }}>{ic}</span>{id}
-        </button>
+      {/* Cofres */}
+      <button onClick={() => setActive("cofres")} style={{
+        background: "none", border: "none",
+        color: active === "cofres" ? C.orange : C.dim,
+        fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700,
+        cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+        letterSpacing: 0.5, flex: 1,
+      }}>
+        <span style={{ fontSize: 22 }}>🏦</span>Cofres
+      </button>
+
+      {/* Botão IA — destaque central */}
+      <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
+        <button onClick={onIA} style={{
+          width: 56, height: 56, borderRadius: "50%", border: "none",
+          background: `linear-gradient(135deg, ${C.teal}, #009E82)`,
+          boxShadow: `0 0 0 3px rgba(8,8,16,1), 0 0 0 5px ${C.teal}50, 0 8px 24px ${C.teal}60`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 26, cursor: "pointer",
+          transform: "translateY(-10px)",
+          transition: "transform 0.2s, box-shadow 0.2s",
+        }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-14px) scale(1.06)"; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = "translateY(-10px) scale(1)"; }}
+        >🤖</button>
+      </div>
+
+      {/* Config */}
+      <button onClick={() => setActive("config")} style={{
+        background: "none", border: "none",
+        color: active === "config" ? C.orange : C.dim,
+        fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700,
+        cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+        letterSpacing: 0.5, flex: 1,
+      }}>
+        <span style={{ fontSize: 22 }}>⚙️</span>Config
+      </button>
+    </div>
+  );
+}
+
+/* ─── COFRE IA — CHAT ────────────────────────────────────────────────────── */
+const SYSTEM_PROMPT = `Você é o Cofre IA, assistente financeiro exclusivo para motoristas de aplicativo no Brasil (Uber, 99, InDriver e similares).
+
+REGRAS ABSOLUTAS:
+1. Responda APENAS perguntas sobre finanças pessoais para motoristas de app.
+2. Se a pergunta não for sobre finanças de motorista de app, recuse educadamente e redirecione.
+3. Seja direto, prático e use linguagem simples — o motorista está no celular entre corridas.
+4. Use valores em R$ e contexto brasileiro.
+5. Nunca dê conselhos sobre como dirigir, rotas ou plataformas — apenas finanças.
+
+VOCÊ PODE AJUDAR COM:
+- Quanto guardar por dia/semana/mês para metas como IPVA, seguro, revisão
+- Como calcular ganho líquido real (descontando combustível, depreciação, manutenção)
+- Imposto de renda para autônomo (MEI, carnê-leão)
+- Reserva de emergência para renda variável
+- Metas de poupança específicas para motoristas
+- Depreciação do veículo e quando vale a pena trocar
+- Estratégias para períodos de baixa demanda
+- Como sair das dívidas sendo motorista de app
+
+QUANDO RECUSAR, diga algo como:
+"Sou especialista só em finanças para motoristas 🚕 Posso te ajudar com [sugestão financeira relacionada]."
+
+FORMATO DAS RESPOSTAS:
+- Máximo 3 parágrafos curtos OU uma lista simples
+- Use emojis com moderação (🚕💰🔧📅)
+- Sempre termine com uma dica prática
+- Linguagem simples e direta`;
+
+const SUGESTOES_IA = [
+  "Quanto guardar por dia pro IPVA?",
+  "Como calcular meu ganho líquido?",
+  "Preciso pagar imposto de renda?",
+  "Como montar reserva de emergência?",
+  "Vale a pena trocar o carro?",
+  "Quanto o carro me custa por km?",
+];
+
+function MsgBubble({ msg }) {
+  const isUser = msg.role === "user";
+  return (
+    <div style={{
+      display: "flex", justifyContent: isUser ? "flex-end" : "flex-start",
+      marginBottom: 14, animation: "fadeUp 0.22s ease",
+    }}>
+      {!isUser && (
+        <div style={{
+          width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+          background: `linear-gradient(135deg, ${C.teal}, #00A080)`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 15, marginRight: 8, marginTop: 2,
+          boxShadow: `0 4px 14px ${C.teal}55`,
+        }}>🤖</div>
+      )}
+      <div style={{
+        maxWidth: "78%",
+        background: isUser ? `linear-gradient(135deg, ${C.orange}, ${C.orangeL})` : C.card,
+        border: isUser ? "none" : `1px solid ${C.border}`,
+        borderRadius: isUser ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+        padding: "12px 15px",
+        boxShadow: isUser ? `0 4px 20px ${C.orange}33` : "none",
+      }}>
+        <p style={{
+          margin: 0, fontSize: 14, lineHeight: 1.65,
+          color: "#fff", fontFamily: "'DM Sans', sans-serif",
+          whiteSpace: "pre-wrap",
+        }}>{msg.content}</p>
+        <p style={{
+          margin: "5px 0 0", fontSize: 10,
+          color: isUser ? "rgba(255,255,255,0.45)" : C.dim,
+          textAlign: isUser ? "right" : "left",
+          fontFamily: "'DM Mono', monospace",
+        }}>{msg.time}</p>
+      </div>
+    </div>
+  );
+}
+
+function TypingDots() {
+  return (
+    <div style={{ display: "flex", gap: 5, padding: "14px 16px", alignItems: "center" }}>
+      {[0, 1, 2].map(i => (
+        <div key={i} style={{
+          width: 7, height: 7, borderRadius: "50%", background: C.mid,
+          animation: "bounce 1.2s ease infinite",
+          animationDelay: `${i * 0.18}s`,
+        }} />
       ))}
+    </div>
+  );
+}
+
+function CofreIAChat({ onFechar }) {
+  const [msgs, setMsgs] = useState([{
+    role: "assistant",
+    content: "Olá! Sou o Cofre IA 🤖\n\nPode falar comigo! Toque no microfone e pergunte sobre IPVA, imposto, ganho líquido, reserva de emergência e muito mais.\n\nNo que posso te ajudar?",
+    time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+  }]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState(null);
+
+  // ── VOZ ──
+  const [voiceMode, setVoiceMode]     = useState(false); // true = modo voz ativo
+  const [gravando, setGravando]       = useState(false);
+  const [transcrito, setTranscrito]   = useState("");
+  const [falando, setFalando]         = useState(false);  // TTS em andamento
+  const recognitionRef = useRef(null);
+  const synthRef       = useRef(window.speechSynthesis);
+
+  const bottomRef = useRef(null);
+  const inputRef  = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs, loading]);
+
+  // Inicializa SpeechRecognition
+  useEffect(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = "pt-BR";
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.onresult = e => {
+      const t = Array.from(e.results).map(r => r[0].transcript).join("");
+      setTranscrito(t);
+      if (e.results[e.results.length - 1].isFinal) {
+        setGravando(false);
+        enviar(t);
+        setTranscrito("");
+      }
+    };
+    rec.onerror = () => setGravando(false);
+    rec.onend   = () => setGravando(false);
+    recognitionRef.current = rec;
+  }, []);
+
+  function falarTexto(texto) {
+    if (!synthRef.current) return;
+    synthRef.current.cancel();
+    // Remove emojis e markdown básico para TTS mais limpo
+    const limpo = texto.replace(/[\u{1F300}-\u{1FAFF}]/gu, "").replace(/[*_`#]/g, "").trim();
+    const utter = new SpeechSynthesisUtterance(limpo);
+    utter.lang  = "pt-BR";
+    utter.rate  = 0.95;
+    utter.pitch = 1;
+    // Prefere voz feminina BR se disponível
+    const vozes = synthRef.current.getVoices();
+    const vBR = vozes.find(v => v.lang === "pt-BR" && v.name.toLowerCase().includes("female"))
+              || vozes.find(v => v.lang === "pt-BR")
+              || vozes.find(v => v.lang.startsWith("pt"));
+    if (vBR) utter.voice = vBR;
+    utter.onstart = () => setFalando(true);
+    utter.onend   = () => setFalando(false);
+    utter.onerror = () => setFalando(false);
+    synthRef.current.speak(utter);
+  }
+
+  function toggleGravacao() {
+    const rec = recognitionRef.current;
+    if (!rec) { setErro("Reconhecimento de voz não suportado neste navegador."); return; }
+    if (gravando) {
+      rec.stop();
+      setGravando(false);
+    } else {
+      synthRef.current?.cancel();
+      setFalando(false);
+      setTranscrito("");
+      rec.start();
+      setGravando(true);
+    }
+  }
+
+  function pararFala() {
+    synthRef.current?.cancel();
+    setFalando(false);
+  }
+
+  function agora() {
+    return new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  async function enviar(texto) {
+    const pergunta = (texto || input).trim();
+    if (!pergunta || loading) return;
+    setInput("");
+    setErro(null);
+    const novaMsg = { role: "user", content: pergunta, time: agora() };
+    const hist = [...msgs, novaMsg];
+    setMsgs(hist);
+    setLoading(true);
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 600,
+          system: SYSTEM_PROMPT,
+          messages: hist.map(m => ({ role: m.role, content: m.content })),
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const resposta = data.content?.[0]?.text || "Não consegui responder agora.";
+      setMsgs(prev => [...prev, { role: "assistant", content: resposta, time: agora() }]);
+      // Lê em voz alta automaticamente se modo voz ativo
+      if (voiceMode) falarTexto(resposta);
+    } catch {
+      setErro("Erro de conexão. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const showSugestoes = msgs.length <= 1;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 100,
+      background: C.bg, maxWidth: 430,
+      left: "50%", transform: "translateX(-50%)",
+      display: "flex", flexDirection: "column",
+      animation: "slideUp 0.3s cubic-bezier(.4,0,.2,1)",
+    }}>
+      {/* ── HEADER ── */}
+      <div style={{
+        padding: "52px 20px 14px",
+        background: `linear-gradient(180deg, ${C.teal}12 0%, transparent 100%)`,
+        borderBottom: `1px solid ${C.border}`, flexShrink: 0,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={onFechar} style={{
+            background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 10, width: 36, height: 36, cursor: "pointer",
+            color: C.mid, fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>←</button>
+          <div style={{
+            width: 42, height: 42, borderRadius: 14, flexShrink: 0,
+            background: `linear-gradient(135deg, ${C.teal}, #00A080)`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 22, boxShadow: `0 5px 18px ${C.teal}55`,
+          }}>🤖</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: C.white }}>Cofre IA</h2>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 4,
+                background: `${C.teal}18`, border: `1px solid ${C.teal}35`,
+                borderRadius: 100, padding: "2px 8px",
+              }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.teal, animation: "pulse 2s infinite" }} />
+                <span style={{ fontSize: 9, color: C.teal, fontWeight: 700, letterSpacing: 0.5 }}>ONLINE</span>
+              </div>
+            </div>
+            <p style={{ margin: "1px 0 0", fontSize: 11, color: C.mid }}>Especialista em finanças para motoristas</p>
+          </div>
+          {/* Toggle modo voz */}
+          <button onClick={() => { setVoiceMode(v => !v); pararFala(); }} style={{
+            background: voiceMode ? `${C.teal}25` : C.surface,
+            border: `1px solid ${voiceMode ? C.teal : C.border}`,
+            borderRadius: 10, padding: "6px 10px", cursor: "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+          }}>
+            <span style={{ fontSize: 18 }}>🎙️</span>
+            <span style={{ fontSize: 9, color: voiceMode ? C.teal : C.mid, fontWeight: 700, letterSpacing: 0.3 }}>
+              {voiceMode ? "VOZ ON" : "VOZ"}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── MODO VOZ — UI GRANDE ── */}
+      {voiceMode && (
+        <div style={{
+          flex: 1, display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          padding: "24px 24px 20px", gap: 20,
+          background: `radial-gradient(ellipse at center, ${C.teal}08 0%, transparent 65%)`,
+        }}>
+          {/* Ondas de áudio */}
+          <div style={{ position: "relative", width: 160, height: 160, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {(gravando || falando) && [1,2,3].map(i => (
+              <div key={i} style={{
+                position: "absolute", borderRadius: "50%",
+                border: `2px solid ${gravando ? C.orange : C.teal}`,
+                width: 60 + i*34, height: 60 + i*34,
+                opacity: 0.6 / i,
+                animation: `ripple 1.6s ease-out infinite`,
+                animationDelay: `${i * 0.28}s`,
+              }} />
+            ))}
+            {/* Botão microfone principal */}
+            <button
+              onMouseDown={toggleGravacao}
+              onTouchStart={e => { e.preventDefault(); toggleGravacao(); }}
+              style={{
+                width: 90, height: 90, borderRadius: "50%", border: "none",
+                background: gravando
+                  ? `linear-gradient(135deg, ${C.orange}, #FF3000)`
+                  : falando
+                  ? `linear-gradient(135deg, ${C.teal}, #009E82)`
+                  : C.surface,
+                border: `2px solid ${gravando ? C.orange : falando ? C.teal : C.border}`,
+                fontSize: 38, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: gravando
+                  ? `0 0 40px ${C.orange}66`
+                  : falando
+                  ? `0 0 40px ${C.teal}66`
+                  : `0 4px 20px rgba(0,0,0,0.4)`,
+                transition: "all 0.2s ease",
+              }}
+            >
+              {falando ? "🔊" : gravando ? "⏹" : "🎙️"}
+            </button>
+          </div>
+
+          {/* Status */}
+          <div style={{ textAlign: "center" }}>
+            <p style={{
+              margin: 0, fontSize: 18, fontWeight: 700, color: C.white,
+              animation: (gravando || falando) ? "pulse 1.2s infinite" : "none",
+            }}>
+              {gravando ? "Ouvindo..." : falando ? "Respondendo..." : loading ? "Pensando..." : "Toque para falar"}
+            </p>
+            {transcrito && (
+              <p style={{ margin: "8px 0 0", fontSize: 14, color: C.mid, fontStyle: "italic", maxWidth: 280, textAlign: "center" }}>
+                "{transcrito}"
+              </p>
+            )}
+            {!gravando && !falando && !loading && (
+              <p style={{ margin: "8px 0 0", fontSize: 12, color: C.dim }}>
+                A IA responde e lê em voz alta
+              </p>
+            )}
+          </div>
+
+          {/* Parar fala */}
+          {falando && (
+            <button onClick={pararFala} style={{
+              background: `${C.orange}18`, border: `1px solid ${C.orange}40`,
+              borderRadius: 100, padding: "8px 20px", color: C.orange,
+              fontFamily: "'DM Sans', sans-serif", fontWeight: 600, fontSize: 13, cursor: "pointer",
+            }}>
+              ⏸ Parar
+            </button>
+          )}
+
+          {/* Últimas msgs em modo voz */}
+          {msgs.length > 1 && (
+            <div style={{
+              width: "100%", maxHeight: 160, overflowY: "auto",
+              background: C.surface, border: `1px solid ${C.border}`,
+              borderRadius: 16, padding: "14px 16px",
+            }}>
+              {msgs.slice(-3).map((m, i) => (
+                <div key={i} style={{ marginBottom: i < 2 ? 10 : 0 }}>
+                  <p style={{ margin: 0, fontSize: 10, color: m.role === "user" ? C.orange : C.teal, fontWeight: 700, marginBottom: 3 }}>
+                    {m.role === "user" ? "Você" : "Cofre IA"}
+                  </p>
+                  <p style={{ margin: 0, fontSize: 13, color: C.white, lineHeight: 1.5 }}>
+                    {m.content.length > 120 ? m.content.slice(0, 120) + "..." : m.content}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sugestões rápidas de voz */}
+          {msgs.length <= 1 && (
+            <div style={{ width: "100%" }}>
+              <p style={{ fontSize: 10, color: C.dim, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10, textAlign: "center" }}>
+                Ou toque para perguntar
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+                {SUGESTOES_IA.slice(0, 4).map(s => (
+                  <button key={s} onClick={() => enviar(s)} style={{
+                    background: C.surface, border: `1px solid ${C.border}`,
+                    borderRadius: 100, padding: "7px 13px",
+                    color: C.white, fontFamily: "'DM Sans', sans-serif",
+                    fontSize: 12, fontWeight: 500, cursor: "pointer",
+                  }}>{s}</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── MODO TEXTO (padrão) ── */}
+      {!voiceMode && (
+        <>
+          <div style={{ flex: 1, overflowY: "auto", padding: "18px 16px 0" }}>
+            {showSugestoes && (
+              <div style={{ marginBottom: 18, animation: "fadeUp 0.35s ease" }}>
+                <p style={{ fontSize: 10, color: C.mid, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10, fontWeight: 600 }}>
+                  Perguntas frequentes
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                  {SUGESTOES_IA.map(s => (
+                    <button key={s} onClick={() => enviar(s)} style={{
+                      background: C.surface, border: `1px solid ${C.border}`,
+                      borderRadius: 100, padding: "7px 13px",
+                      color: C.white, fontFamily: "'DM Sans', sans-serif",
+                      fontSize: 12, fontWeight: 500, cursor: "pointer",
+                      transition: "all 0.15s", whiteSpace: "nowrap",
+                    }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.white; }}
+                    >{s}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {msgs.map((m, i) => <MsgBubble key={i} msg={m} />)}
+
+            {loading && (
+              <div style={{ display: "flex", alignItems: "flex-start", marginBottom: 12 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                  background: `linear-gradient(135deg, ${C.teal}, #00A080)`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 15, marginRight: 8,
+                }}>🤖</div>
+                <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: "18px 18px 18px 4px" }}>
+                  <TypingDots />
+                </div>
+              </div>
+            )}
+
+            {erro && (
+              <div style={{
+                background: `${C.orange}12`, border: `1px solid ${C.orange}35`,
+                borderRadius: 12, padding: "11px 14px", marginBottom: 12,
+                display: "flex", gap: 8, alignItems: "center",
+              }}>
+                <span>⚠️</span>
+                <p style={{ margin: 0, fontSize: 12, color: C.orange }}>{erro}</p>
+              </div>
+            )}
+            <div ref={bottomRef} style={{ height: 12 }} />
+          </div>
+
+          {/* Input texto */}
+          <div style={{ padding: "12px 16px 36px", borderTop: `1px solid ${C.border}`, background: C.bg, flexShrink: 0 }}>
+            <div style={{
+              display: "flex", gap: 10, alignItems: "flex-end",
+              background: C.surface, border: `1px solid ${C.border}`,
+              borderRadius: 16, padding: "10px 12px",
+            }}>
+              {/* Mic button inline */}
+              <button
+                onMouseDown={toggleGravacao}
+                onTouchStart={e => { e.preventDefault(); toggleGravacao(); }}
+                style={{
+                  width: 38, height: 38, borderRadius: 10, border: "none", flexShrink: 0,
+                  background: gravando ? C.orange : C.dim,
+                  color: "#fff", fontSize: 18, cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  boxShadow: gravando ? `0 4px 16px ${C.orange}55` : "none",
+                  transition: "all 0.2s",
+                  animation: gravando ? "pulse 1s infinite" : "none",
+                }}>🎙️</button>
+
+              <textarea
+                ref={inputRef}
+                value={input || transcrito}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
+                placeholder="Fale ou escreva sua pergunta..."
+                rows={1}
+                style={{
+                  flex: 1, background: "transparent", border: "none", outline: "none",
+                  resize: "none", overflow: "hidden", color: C.white,
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 14, lineHeight: 1.5, paddingTop: 2,
+                  maxHeight: 90, overflowY: "auto",
+                }}
+                onInput={e => {
+                  e.target.style.height = "auto";
+                  e.target.style.height = Math.min(e.target.scrollHeight, 90) + "px";
+                }}
+              />
+              <button onClick={() => enviar()} disabled={!(input || transcrito).trim() || loading} style={{
+                width: 38, height: 38, borderRadius: 10, border: "none",
+                background: (input || transcrito).trim() && !loading ? C.teal : C.dim,
+                color: "#fff", fontSize: 16, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0, transition: "all 0.2s",
+                boxShadow: (input || transcrito).trim() && !loading ? `0 4px 16px ${C.teal}55` : "none",
+              }}>
+                {loading
+                  ? <div style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                  : "↑"}
+              </button>
+            </div>
+            <p style={{ margin: "7px 0 0", fontSize: 10, color: C.dim, textAlign: "center" }}>
+              🎙️ Microfone · toque para falar · ou escreva
+            </p>
+          </div>
+        </>
+      )}
+
+      <style>{`
+        @keyframes ripple {
+          0%   { transform: scale(0.8); opacity: 0.7; }
+          100% { transform: scale(1.6); opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -945,6 +1599,7 @@ export default function App() {
   const [cofres, setCofres] = useState(INITIAL_COFRES);
   const [sel, setSel] = useState(null);
   const [modal, setModal] = useState(null);
+  const [iaAberta, setIaAberta] = useState(false);
 
   function criarCofre(data) {
     setCofres(prev => [...prev, {
@@ -967,8 +1622,12 @@ export default function App() {
       <FontLink />
       <style>{`
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        input::placeholder { color: #444455; }
-        @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+        input::placeholder, textarea::placeholder { color: #444455; }
+        @keyframes pulse  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+        @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes slideUp{ from{opacity:0;transform:translateX(-50%) translateY(40px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
+        @keyframes spin   { to{transform:rotate(360deg)} }
         ::-webkit-scrollbar { display: none; }
       `}</style>
 
@@ -985,7 +1644,7 @@ export default function App() {
               onCofre={c => { setSel(c); setScreen("detalhe"); }}
               onResgate={c => { setSel(c); setModal("resgate"); }}
             />
-            <BottomNav />
+            <BottomNav onIA={() => setIaAberta(true)} />
           </>
         )}
         {screen === "novo" && <NovoCofre onCriar={criarCofre} onVoltar={() => setScreen("home")} />}
@@ -1000,6 +1659,9 @@ export default function App() {
 
       {modal === "deposito" && sel && <DepositoModal cofre={sel} onClose={() => setModal(null)} />}
       {modal === "resgate" && sel && <ResgateModal cofre={sel} onClose={() => { setModal(null); setScreen("home"); }} />}
+
+      {/* Cofre IA — overlay completo */}
+      {iaAberta && <CofreIAChat onFechar={() => setIaAberta(false)} />}
     </div>
   );
 }
